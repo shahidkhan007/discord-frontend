@@ -1,5 +1,5 @@
 import io, { Socket } from "socket.io-client";
-import { Message, MessageType, Profile } from "./types";
+import { ChatMessage, Message, MessageType, Profile } from "./types";
 
 const ICE_SERVERS = [
     {
@@ -251,7 +251,7 @@ export class WebRTCViewer {
     onNoHost: (() => void) | null = null;
     onNewTrackAdded: ((stream: MediaStream) => void) | null = null;
     dataChannel: RTCDataChannel | null = null;
-    dtMessageHandler: ((message: any) => void) | null = null;
+    dtMessageHandler: ((message: ChatMessage) => void) | null = null;
     dtOpenHandler: (() => void) | null = null;
 
     constructor(channel: SignalingChannel, profile: Profile, tracks: MediaStreamTrack[]) {

@@ -5,15 +5,13 @@ import { Viewer } from "./Viewer";
 import { CreateProfile } from "./components/CreateProfile";
 import { AppCtxType, Profile } from "./types";
 
-const NAMESPACE = "1b671a64-40d5-491e-99b0-da01ff1f3341";
-export const BASE_URL = process.env.NODE_ENV === "development" ? "http://127.0.0.1:4241" : "/";
+export const BASE_URL = process.env.NODE_ENV === "development" ? "http://127.0.0.1:4241" : "";
 export const AppCtx = createContext({} as AppCtxType);
 
 function App() {
+    const [dp, setDP] = useState("");
     const [role, setRole] = useState<"undecided" | "host" | "viewer">("undecided");
     const [profile, setProfile] = useState<Profile | null>(null);
-
-    const [name, setName] = useState("");
 
     async function checkForHost(): Promise<Profile | null> {
         try {
@@ -26,8 +24,23 @@ function App() {
         }
     }
 
+    const getVersion = async () => {
+        const res = await fetch(BASE_URL + "/api/version");
+        const json = await res.json();
+        if (json.version) {
+            localStorage.setItem("version", json.version.toString());
+        }
+        return json.version ?? null;
+    };
+
     const decideRole = useCallback(async () => {
         const host = await checkForHost();
+        const version = await getVersion();
+
+        if (version && version !== parseInt(localStorage.getItem("version") ?? "0")) {
+            localStorage.clear();
+            return window.location.reload();
+        }
 
         let profileKey;
 
@@ -43,6 +56,7 @@ function App() {
         console.log("Decided role", host ? "viewer" : "host", localProfile);
         if (localProfile) {
             setProfile(JSON.parse(localProfile));
+            setDP(localStorage.getItem(`dp-${JSON.parse(localProfile).id}`) ?? "");
         }
     }, []);
 
@@ -51,7 +65,7 @@ function App() {
     }, [decideRole]);
 
     return (
-        <AppCtx.Provider value={{ profile }}>
+        <AppCtx.Provider value={{ profile, dp }}>
             <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
                 {role === "host" ? (
                     profile ? (

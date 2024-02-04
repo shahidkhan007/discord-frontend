@@ -1,4 +1,4 @@
-import { AudioMutedOutlined, MutedOutlined } from "@ant-design/icons";
+import { AudioMutedOutlined, MutedOutlined, RedoOutlined } from "@ant-design/icons";
 import { Avatar, Button, Divider, Flex, Layout, List, Tag, Typography } from "antd";
 import Sider from "antd/es/layout/Sider";
 import { Content, Footer } from "antd/es/layout/layout";
@@ -7,7 +7,7 @@ import { AppCtx } from "./App";
 import { SignalingChannel, WebRTCHost } from "./WebRTC";
 import { Chat } from "./components/Chat";
 import { Connect } from "./components/Connect";
-import { Profile } from "./types";
+import { ChatMessage, ChatMessageType, Profile, TextMessage, Viewer } from "./types";
 
 const siderStyles: CSSProperties = {
     // backgroundColor: "#424549",
@@ -15,7 +15,20 @@ const siderStyles: CSSProperties = {
     borderBottomRightRadius: "16px",
 };
 
-const getNameChars = (name: string) => {
+function getBase64Image(img: HTMLImageElement) {
+    var canvas = document.createElement("canvas");
+    canvas.width = img.width;
+    canvas.height = img.height;
+
+    var ctx = canvas.getContext("2d");
+    ctx?.drawImage(img, 0, 0);
+
+    var dataURL = canvas.toDataURL("image/png");
+
+    return dataURL.replace(/^data:image\/(png|jpg);base64,/, "");
+}
+
+export const getNameChars = (name: string) => {
     return name
         .split(" ")
         .map((part) => part[0].toUpperCase())
@@ -24,7 +37,7 @@ const getNameChars = (name: string) => {
 };
 
 export const Host = () => {
-    const { profile } = useContext(AppCtx);
+    const { profile, dp } = useContext(AppCtx);
     const stream = useRef<MediaStream | null>(null);
     const scrStream = useRef<MediaStream | null>(null);
     const [mediaOpts, setMediaOpts] = useState<any>({
@@ -48,7 +61,8 @@ export const Host = () => {
         existingHost: null,
     });
     const channel = useRef<SignalingChannel | null>(null);
-    const [messages, setMessages] = useState<any[]>([]);
+    const [messages, setMessages] = useState<TextMessage[]>([]);
+    const viewersRef = useRef<Viewer[]>([]);
 
     const createConnection = async (viewer: Profile) => {
         console.log("Create connection request", viewer);
@@ -64,9 +78,13 @@ export const Host = () => {
         );
         webrtc.setViewerProfile(viewer);
 
+        const dp = localStorage.getItem(`dp-${viewer.id}`) ?? "";
+
         setViewers((vs) => {
-            return { ...vs, [viewer.id]: { ...viewer, status: "new", el, webrtc } };
+            return { ...vs, [viewer.id]: { ...viewer, status: "new", el, webrtc, dp } };
         });
+
+        viewersRef.current.push({ ...viewer, status: "new", el, webrtc, dp });
 
         webrtc.onConnectionStateChange = async (viewer, state) => {
             console.log("Connection state changed");
@@ -82,10 +100,13 @@ export const Host = () => {
                         vs[viewer.id].el.play();
                     };
 
-                    vs[viewer.id].webrtc?.createDataChannel((message) => {
-                        console.log(message);
-                        setMessages((msgs) => [...msgs, message]);
-                        broadcastDTMessage(message, viewer.id);
+                    vs[viewer.id].webrtc?.createDataChannel((message: ChatMessage) => {
+                        if (message.type === ChatMessageType.Text) {
+                            setMessages((msgs) => [...msgs, message]);
+                            broadcastDTMessage(message, viewer.id);
+                        } else if (message.type === ChatMessageType.UserDP) {
+                            localStorage.setItem(`dp-${message.sender.id}`, message.data.dp);
+                        }
                     });
                 }
 
@@ -179,11 +200,12 @@ export const Host = () => {
                 video: true,
             });
 
-            console.log("Tab tracks:", scrStream.current.getAudioTracks());
-
             for (const track of scrStream.current.getAudioTracks()) {
-                track.contentHint = "music";
+                if (track.contentHint) {
+                    track.contentHint = "music";
+                }
                 for (const v of Object.values(viewers)) {
+                    stream.current?.addTrack(track);
                     v.webrtc?.addTrack(track);
                 }
             }
@@ -209,9 +231,9 @@ export const Host = () => {
         }
     };
 
-    const broadcastDTMessage = (message: any, filterId: string | null) => {
-        for (const v of Object.values(viewers)) {
-            if (v.id === filterId) {
+    const broadcastDTMessage = (message: any, filter: string | null) => {
+        for (const v of viewersRef.current) {
+            if (v.id === filter) {
                 continue;
             }
             v.webrtc?.sendDTMessage(message);
@@ -243,6 +265,14 @@ export const Host = () => {
                         danger={mediaOpts.allRemoteMuted}
                         onClick={toggleAllRemoteStreams}
                     />
+                    <Button
+                        onClick={() => {
+                            localStorage.removeItem("hostProfile");
+                            window.location.reload();
+                        }}
+                        icon={<RedoOutlined />}
+                        size="large"
+                    />
                 </Flex>
             </Sider>
             <Layout>
@@ -250,9 +280,14 @@ export const Host = () => {
                     {state.connectionState === "connected" ? (
                         <Chat
                             messages={messages}
-                            sendMessage={(message: any) => {
-                                setMessages([...messages, message]);
-                                broadcastDTMessage(message, null);
+                            sendMessage={(body: string) => {
+                                const msg = {
+                                    type: ChatMessageType.Text,
+                                    sender: profile!,
+                                    data: { body },
+                                };
+                                setMessages([...messages, msg]);
+                                broadcastDTMessage(msg, null);
                             }}
                         />
                     ) : (

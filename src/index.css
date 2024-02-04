@@ -3,3 +3,7 @@ html, body {
     margin: 0px;
     /* background-color: #424549; */
 }
+
+.ant-upload-wrapper {
+    width: fit-content !important;
+}

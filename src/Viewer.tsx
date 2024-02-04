@@ -1,88 +1,157 @@
-import { useRef, useState } from "react";
-import { v5 } from "uuid";
+import { AudioMutedOutlined, MutedOutlined, RedoOutlined } from "@ant-design/icons";
+import { Button, Divider, Flex, Layout, Typography } from "antd";
+import Sider from "antd/es/layout/Sider";
+import { Content, Footer } from "antd/es/layout/layout";
+import { useContext, useRef, useState } from "react";
+import { AppCtx } from "./App";
 import { SignalingChannel, WebRTCViewer } from "./WebRTC";
-import { Profile, UserRole } from "./types";
-
-const NAMESPACE = "1b671a64-40d5-491e-99b0-da01ff1f3341";
+import { Chat } from "./components/Chat";
+import { Connect } from "./components/Connect";
+import { ChatMessageType, TextMessage } from "./types";
 
 export const Viewer = () => {
-    const _webrtc = useRef<WebRTCViewer | null>(null);
+    const { profile } = useContext(AppCtx);
+    const [status, setStatus] = useState({
+        connectionStatus: "new",
+        audio: true,
+        voice: true,
+        noHost: false,
+    });
+    const webrtc = useRef<WebRTCViewer | null>(null);
+    const channel = useRef<SignalingChannel | null>(null);
+    const localStream = useRef<MediaStream | null>(null);
     const audioEl = useRef<HTMLAudioElement | null>(null);
-    const [name, setName] = useState("");
-    const [noHost, setNoHost] = useState(false);
-    const stream = useRef<MediaStream | null>(null);
-    const [messages, setMessages] = useState<any[]>([]);
+    const [messages, setMessages] = useState<TextMessage[]>([]);
 
     const connect = async () => {
-        const profile = JSON.parse(localStorage.getItem("viewerProfile")!) as Profile;
+        setStatus((s) => ({ ...s, connectionStatus: "connecting" }));
+        channel.current = new SignalingChannel(profile);
+        channel.current.initiate();
 
-        stream.current = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+        try {
+            localStream.current = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video: false,
+            });
+        } catch (err) {
+            console.log(err);
+            setStatus((s) => ({ ...s, connectionStatus: "new" }));
+            return;
+        }
 
-        const sigChan = new SignalingChannel(profile);
-        sigChan.initiate();
+        webrtc.current = new WebRTCViewer(
+            channel.current!,
+            profile!,
+            localStream.current.getAudioTracks()
+        );
 
-        const webrtc = new WebRTCViewer(sigChan, profile, stream.current!.getAudioTracks());
-        _webrtc.current = webrtc;
+        webrtc.current.onNoHost = () => {
+            setStatus((s) => ({ ...s, noHost: true }));
+        };
 
-        _webrtc.current.onConnected = async (stream) => {
-            setNoHost(false);
+        webrtc.current.onConnected = (s) => {
+            setStatus((s) => ({ ...s, connectionStatus: "connected", noHost: false }));
             if (audioEl.current) {
-                audioEl.current.srcObject = stream;
-                await audioEl.current.play();
+                audioEl.current.srcObject = s;
+                audioEl.current.onloadeddata = () => {
+                    if (audioEl.current?.paused) {
+                        audioEl.current?.play();
+                    }
+                };
             }
         };
 
-        _webrtc.current.onNewTrackAdded = async (stream) => {
+        webrtc.current.onNewTrackAdded = async (s) => {
             if (audioEl.current) {
-                audioEl.current.srcObject = stream;
+                audioEl.current.srcObject = s;
                 if (audioEl.current.paused) {
                     await audioEl.current.play();
                 }
             }
         };
 
-        _webrtc.current.dtMessageHandler = (message) => {
-            console.log(message);
-            setMessages((msgs) => [...msgs, message]);
-        };
-
-        _webrtc.current.onNoHost = () => {
-            setNoHost(true);
+        webrtc.current.dtMessageHandler = (message) => {
+            if (message.type === ChatMessageType.Text) {
+                setMessages((msgs) => [...msgs, message]);
+            }
         };
     };
 
-    return window.localStorage.getItem("viewerProfile") ? (
-        <div>
-            <h1>Viewer</h1>
-            <button onClick={connect}>Connect</button>
-            <audio ref={audioEl} controls />
-            {noHost && <p>No host found, please try again later</p>}
-        </div>
-    ) : (
-        <form
-            onSubmit={(ev) => {
-                ev.preventDefault();
+    const sendMessage = (body: string) => {
+        if (webrtc.current && profile) {
+            const msg: TextMessage = {
+                type: ChatMessageType.Text,
+                sender: profile,
+                data: { body },
+            };
+            webrtc.current.sendDTMessage(msg);
+            setMessages((msgs) => [...msgs, msg]);
+        }
+    };
 
-                window.localStorage.setItem(
-                    "viewerProfile",
-                    JSON.stringify({
-                        name,
-                        id: v5(name + Math.ceil(Math.random() * 1e6), NAMESPACE),
-                        role: UserRole.Viewer,
-                    })
-                );
+    const toggleLocal = () => {
+        if (localStream.current) {
+            for (const track of localStream.current.getTracks()) {
+                track.enabled = !track.enabled;
+            }
+        }
+        setStatus((s) => ({ ...s, voice: !s.voice }));
+    };
 
-                window.location.reload();
-            }}
-        >
-            <input
-                type="text"
-                value={name}
-                onChange={(ev) => {
-                    setName(ev.target.value);
-                }}
-            />
-            <button type="submit">Set name</button>
-        </form>
+    const toggleRemote = () => {
+        if (audioEl.current) {
+            audioEl.current.volume = audioEl.current.volume === 1 ? 0 : 1;
+        }
+        setStatus((s) => ({ ...s, audio: !s.audio }));
+    };
+
+    return (
+        <Layout style={{ height: "100vh" }}>
+            <Sider width="30%">
+                <Layout style={{ height: "100%", backgroundColor: "inherit" }}>
+                    <Content style={{ display: "flex", alignItems: "flex-end" }}>
+                        <Divider style={{ marginBottom: 0 }} />
+                    </Content>
+                    <Footer style={{ backgroundColor: "inherit" }}>
+                        <Flex gap="middle" justify="center">
+                            <Button
+                                size="large"
+                                danger={!status.voice}
+                                onClick={toggleLocal}
+                                icon={<AudioMutedOutlined />}
+                            />
+                            <Button
+                                size="large"
+                                danger={!status.audio}
+                                onClick={toggleRemote}
+                                icon={<MutedOutlined />}
+                            />
+                            <Button
+                                onClick={() => {
+                                    localStorage.removeItem("viewerProfile");
+                                    window.location.reload();
+                                }}
+                                icon={<RedoOutlined />}
+                                size="large"
+                            />
+                        </Flex>
+                    </Footer>
+                </Layout>
+            </Sider>
+            <Layout>
+                <Content>
+                    {status.noHost ? (
+                        <Typography.Title level={3}>
+                            No Host found. sorry :( Refresh the page to become host yourself :)
+                        </Typography.Title>
+                    ) : status.connectionStatus === "connected" ? (
+                        <Chat ignoreBottom messages={messages} sendMessage={sendMessage} />
+                    ) : (
+                        <Connect state={status.connectionStatus} onClick={connect} />
+                    )}
+                </Content>
+            </Layout>
+            <audio ref={audioEl} hidden />
+        </Layout>
     );
 };
