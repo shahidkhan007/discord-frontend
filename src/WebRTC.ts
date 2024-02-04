@@ -109,6 +109,7 @@ export class WebRTCHost {
     stream: MediaStream | null = new MediaStream();
     onTrackAdded: ((track: MediaStreamTrack) => void) | null = null;
     dataChannel: RTCDataChannel | null = null;
+    remoteTrackIds: string[] = [];
 
     constructor(hostProfile: Profile, _channel: SignalingChannel, tracks: MediaStreamTrack[]) {
         this.connection = new RTCPeerConnection({
@@ -161,11 +162,7 @@ export class WebRTCHost {
         };
 
         for (const track of tracks) {
-            if ("contentHint" in track) {
-                track.contentHint = "music";
-            } else {
-                console.log("Content hints not supported");
-            }
+            this.remoteTrackIds.push(track.id);
             this.connection.addTrack(track);
         }
     }
@@ -246,10 +243,10 @@ export class WebRTCViewer {
     connection: RTCPeerConnection;
     channel: SignalingChannel;
     profile: Profile;
-    stream: MediaStream;
-    onConnected: ((stream: MediaStream) => void) | null = null;
+    streams: Map<string, MediaStream>;
+    onConnected: (() => void) | null = null;
     onNoHost: (() => void) | null = null;
-    onNewTrackAdded: ((stream: MediaStream) => void) | null = null;
+    onStreamAdded: ((id: string, label: string, stream: MediaStream) => void) | null = null;
     dataChannel: RTCDataChannel | null = null;
     dtMessageHandler: ((message: ChatMessage) => void) | null = null;
     dtOpenHandler: (() => void) | null = null;
@@ -258,7 +255,7 @@ export class WebRTCViewer {
         this.connection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
         this.channel = channel;
         this.profile = profile;
-        this.stream = new MediaStream();
+        this.streams = new Map();
 
         this.channel.addHandler(this.profile, (message) => this.messageHandler(message));
 
@@ -268,18 +265,19 @@ export class WebRTCViewer {
         });
 
         this.connection.ontrack = (ev) => {
-            console.log("New track received");
-            this.stream.addTrack(ev.track);
+            console.log("New track received", ev.track);
 
-            if (this.onNewTrackAdded) {
-                this.onNewTrackAdded(this.stream);
+            const stream = new MediaStream([ev.track]);
+            this.streams.set(ev.track.id, stream);
+            if (this.onStreamAdded) {
+                this.onStreamAdded(ev.track.id, ev.track.label, stream);
             }
         };
 
         this.connection.onconnectionstatechange = () => {
             console.log("Connection:", this.connection.connectionState);
             if (this.connection.connectionState === "connected" && this.onConnected) {
-                this.onConnected(this.stream);
+                this.onConnected();
             }
         };
 
@@ -360,7 +358,7 @@ export class WebRTCViewer {
         }
     }
 
-    public getStream() {
-        return this.stream;
+    public getStreams() {
+        return this.streams;
     }
 }

@@ -1,5 +1,5 @@
-import { AudioMutedOutlined, MutedOutlined, RedoOutlined } from "@ant-design/icons";
-import { Button, Divider, Flex, Layout, Typography } from "antd";
+import { AudioMutedOutlined, RedoOutlined } from "@ant-design/icons";
+import { Button, Divider, Flex, Layout, Slider, Typography } from "antd";
 import Sider from "antd/es/layout/Sider";
 import { Content, Footer } from "antd/es/layout/layout";
 import { useContext, useRef, useState } from "react";
@@ -20,7 +20,9 @@ export const Viewer = () => {
     const webrtc = useRef<WebRTCViewer | null>(null);
     const channel = useRef<SignalingChannel | null>(null);
     const localStream = useRef<MediaStream | null>(null);
-    const audioEl = useRef<HTMLAudioElement | null>(null);
+    const [audioEls, setAudioEls] = useState<{
+        [key: string]: { el: HTMLAudioElement; label: string; volume: number };
+    }>({});
     const [messages, setMessages] = useState<TextMessage[]>([]);
 
     const connect = async () => {
@@ -49,31 +51,29 @@ export const Viewer = () => {
             setStatus((s) => ({ ...s, noHost: true }));
         };
 
-        webrtc.current.onConnected = (s) => {
-            setStatus((s) => ({ ...s, connectionStatus: "connected", noHost: false }));
-            if (audioEl.current) {
-                audioEl.current.srcObject = s;
-                audioEl.current.onloadeddata = () => {
-                    if (audioEl.current?.paused) {
-                        audioEl.current?.play();
-                    }
-                };
-            }
-        };
-
-        webrtc.current.onNewTrackAdded = async (s) => {
-            if (audioEl.current) {
-                audioEl.current.srcObject = s;
-                if (audioEl.current.paused) {
-                    await audioEl.current.play();
-                }
-            }
-        };
-
         webrtc.current.dtMessageHandler = (message) => {
             if (message.type === ChatMessageType.Text) {
                 setMessages((msgs) => [...msgs, message]);
             }
+        };
+
+        webrtc.current.onStreamAdded = (id, label, stream) => {
+            const el = document.createElement("audio");
+            el.srcObject = stream;
+            el.hidden = true;
+            el.onloadeddata = () => {
+                el.play();
+            };
+            document.body.appendChild(el);
+
+            setAudioEls((els) => ({
+                ...els,
+                [id]: { id, label, el, volume: 100 },
+            }));
+        };
+
+        webrtc.current.onConnected = () => {
+            setStatus((s) => ({ ...s, connectionStatus: "connected" }));
         };
     };
 
@@ -98,11 +98,9 @@ export const Viewer = () => {
         setStatus((s) => ({ ...s, voice: !s.voice }));
     };
 
-    const toggleRemote = () => {
-        if (audioEl.current) {
-            audioEl.current.volume = audioEl.current.volume === 1 ? 0 : 1;
-        }
-        setStatus((s) => ({ ...s, audio: !s.audio }));
+    const changeVolume = (id: string, vol: number) => {
+        audioEls[id].el.volume = vol / 100;
+        setAudioEls({ ...audioEls, [id]: { ...audioEls[id], volume: vol } });
     };
 
     return (
@@ -113,27 +111,40 @@ export const Viewer = () => {
                         <Divider style={{ marginBottom: 0 }} />
                     </Content>
                     <Footer style={{ backgroundColor: "inherit" }}>
-                        <Flex gap="middle" justify="center">
-                            <Button
-                                size="large"
-                                danger={!status.voice}
-                                onClick={toggleLocal}
-                                icon={<AudioMutedOutlined />}
-                            />
-                            <Button
+                        <Flex vertical>
+                            <Flex gap="middle" justify="center">
+                                <Button
+                                    size="large"
+                                    danger={!status.voice}
+                                    onClick={toggleLocal}
+                                    icon={<AudioMutedOutlined />}
+                                />
+                                {/* <Button
                                 size="large"
                                 danger={!status.audio}
                                 onClick={toggleRemote}
                                 icon={<MutedOutlined />}
-                            />
-                            <Button
-                                onClick={() => {
-                                    localStorage.removeItem("viewerProfile");
-                                    window.location.reload();
-                                }}
-                                icon={<RedoOutlined />}
-                                size="large"
-                            />
+                            /> */}
+                                <Button
+                                    onClick={() => {
+                                        localStorage.removeItem("viewerProfile");
+                                        window.location.reload();
+                                    }}
+                                    icon={<RedoOutlined />}
+                                    size="large"
+                                />
+                            </Flex>
+                            {Object.entries(audioEls).map((entry) => (
+                                <div key={entry[0]}>
+                                    <Typography.Text>{entry[1].label}</Typography.Text>
+                                    <Slider
+                                        value={audioEls[entry[0]].volume}
+                                        min={0}
+                                        max={100}
+                                        onChange={(vol) => changeVolume(entry[0], vol)}
+                                    />
+                                </div>
+                            ))}
                         </Flex>
                     </Footer>
                 </Layout>
@@ -151,7 +162,6 @@ export const Viewer = () => {
                     )}
                 </Content>
             </Layout>
-            <audio ref={audioEl} hidden />
         </Layout>
     );
 };

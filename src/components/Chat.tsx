@@ -12,6 +12,15 @@ type Props = {
     ignoreBottom?: boolean;
 };
 
+const emoteTable = new Map(
+    Object.entries({
+        ":)": String.fromCodePoint(0x1f603),
+        lol: String.fromCodePoint(0x1f606),
+        ":(": String.fromCodePoint(0x1f62d),
+        "<3": String.fromCodePoint(0x2764),
+    })
+);
+
 export const Chat = ({ messages, sendMessage, ignoreBottom }: Props) => {
     const { profile, dp } = useContext(AppCtx);
     const [messageBody, setMessageBody] = useState("");
@@ -79,8 +88,17 @@ export const Chat = ({ messages, sendMessage, ignoreBottom }: Props) => {
                                 strong
                                 code
                                 style={{ margin: 0, color: message.sender.color ?? "#7289da" }}
+                                // dangerouslySetInnerHTML={{
+                                //     __html: message.data.body
+                                //         .split(" ")
+                                //         .map((word) => emoteTable.get(word) ?? word)
+                                //         .join(" "),
+                                // }}
                             >
-                                {message.data.body}
+                                {message.data.body
+                                    .split(" ")
+                                    .map((word) => emoteTable.get(word) ?? word)
+                                    .join(" ")}
                             </Typography.Paragraph>
                         </List.Item>
                     )}

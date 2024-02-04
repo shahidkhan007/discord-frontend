@@ -39,6 +39,7 @@ export type AppCtxType = {
 export enum ChatMessageType {
     Text = "text",
     UserDP = "user-dp",
+    UserConnected = "user-connected",
 }
 
 export type ChatMessage<Data = any> = {

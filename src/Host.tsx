@@ -71,11 +71,10 @@ export const Host = () => {
         el.id = viewer.id;
         document.body.appendChild(el);
 
-        const webrtc = new WebRTCHost(
-            profile!,
-            channel.current!,
-            stream.current?.getAudioTracks() ?? []
-        );
+        const webrtc = new WebRTCHost(profile!, channel.current!, [
+            ...(stream.current?.getAudioTracks() ?? []),
+            ...(scrStream.current?.getAudioTracks() ?? []),
+        ]);
         webrtc.setViewerProfile(viewer);
 
         const dp = localStorage.getItem(`dp-${viewer.id}`) ?? "";
@@ -95,11 +94,13 @@ export const Host = () => {
                 }
 
                 if (state === "connected") {
+                    // get and play the viewer stream
                     vs[viewer.id].el.srcObject = webrtc.getStream();
                     vs[viewer.id].el.onloadeddata = () => {
                         vs[viewer.id].el.play();
                     };
 
+                    // set up data channel
                     vs[viewer.id].webrtc?.createDataChannel((message: ChatMessage) => {
                         if (message.type === ChatMessageType.Text) {
                             setMessages((msgs) => [...msgs, message]);
@@ -200,13 +201,14 @@ export const Host = () => {
                 video: true,
             });
 
-            for (const track of scrStream.current.getAudioTracks()) {
-                if (track.contentHint) {
-                    track.contentHint = "music";
-                }
-                for (const v of Object.values(viewers)) {
-                    stream.current?.addTrack(track);
-                    v.webrtc?.addTrack(track);
+            for (const viewer of Object.values(viewers)) {
+                const webrtc = viewer.webrtc;
+                if (!webrtc) continue;
+
+                for (const track of scrStream.current.getAudioTracks()) {
+                    if (!webrtc.remoteTrackIds.includes(track.id)) {
+                        webrtc.addTrack(track);
+                    }
                 }
             }
 

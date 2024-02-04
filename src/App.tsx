@@ -1,8 +1,9 @@
 import { ConfigProvider, Flex, Spin, Typography, theme } from "antd";
 import { createContext, useCallback, useEffect, useState } from "react";
+import { v5 } from "uuid";
 import { Host } from "./Host";
 import { Viewer } from "./Viewer";
-import { CreateProfile } from "./components/CreateProfile";
+import { CreateProfile, NAMESPACE } from "./components/CreateProfile";
 import { AppCtxType, Profile } from "./types";
 
 export const BASE_URL = process.env.NODE_ENV === "development" ? "http://127.0.0.1:4241" : "";
@@ -53,8 +54,16 @@ function App() {
         }
 
         const localProfile = localStorage.getItem(profileKey);
+
         console.log("Decided role", host ? "viewer" : "host", localProfile);
         if (localProfile) {
+            localStorage.setItem(
+                profileKey,
+                JSON.stringify({
+                    ...JSON.parse(localProfile),
+                    id: v5(Math.ceil(Math.random() * 1e9).toString(), NAMESPACE),
+                })
+            );
             setProfile(JSON.parse(localProfile));
             setDP(localStorage.getItem(`dp-${JSON.parse(localProfile).id}`) ?? "");
         }
