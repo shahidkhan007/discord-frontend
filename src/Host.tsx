@@ -37,7 +37,8 @@ export const getNameChars = (name: string) => {
 };
 
 export const Host = () => {
-    const { profile, dp } = useContext(AppCtx);
+    const { profile, joinElRef, leaveElRef, isWindowActive, setIsWindowActive, setNMessages } =
+        useContext(AppCtx);
     const stream = useRef<MediaStream | null>(null);
     const scrStream = useRef<MediaStream | null>(null);
     const [mediaOpts, setMediaOpts] = useState<any>({
@@ -51,7 +52,7 @@ export const Host = () => {
     const [viewers, setViewers] = useState<{
         [key: string]: Profile & {
             status: string;
-            el: HTMLAudioElement;
+            el: HTMLVideoElement;
             webrtc: WebRTCHost | null;
         };
     }>({});
@@ -63,17 +64,19 @@ export const Host = () => {
     const channel = useRef<SignalingChannel | null>(null);
     const [messages, setMessages] = useState<TextMessage[]>([]);
     const viewersRef = useRef<Viewer[]>([]);
+    const friendlyNames = useRef<Map<string, string>>(new Map());
 
     const createConnection = async (viewer: Profile) => {
         console.log("Create connection request", viewer);
 
-        const el = document.createElement("audio");
+        const el = document.createElement("video");
         el.id = viewer.id;
+        el.controls = true
         document.body.appendChild(el);
 
         const webrtc = new WebRTCHost(profile!, channel.current!, [
-            ...(stream.current?.getAudioTracks() ?? []),
-            ...(scrStream.current?.getAudioTracks() ?? []),
+            ...(stream.current?.getTracks() ?? []),
+            ...(scrStream.current?.getTracks() ?? []),
         ]);
         webrtc.setViewerProfile(viewer);
 
@@ -101,14 +104,51 @@ export const Host = () => {
                     };
 
                     // set up data channel
-                    vs[viewer.id].webrtc?.createDataChannel((message: ChatMessage) => {
-                        if (message.type === ChatMessageType.Text) {
-                            setMessages((msgs) => [...msgs, message]);
+                    vs[viewer.id].webrtc?.createDataChannel(
+                        (message: ChatMessage) => {
+                            switch (message.type) {
+                                case ChatMessageType.Text: {
+                                    console.log("IS WINDOW ACTIVE:", isWindowActive);
+
+                                    setIsWindowActive((active) => {
+                                        if (!active) {
+                                            setNMessages((n) => n + 1);
+                                        }
+                                        return active;
+                                    });
+                                    setMessages((msgs) => [...msgs, message]);
+                                    break;
+                                }
+
+                                case ChatMessageType.UserConnected: {
+                                    joinElRef.current?.play();
+                                    break;
+                                }
+                            }
                             broadcastDTMessage(message, viewer.id);
-                        } else if (message.type === ChatMessageType.UserDP) {
-                            localStorage.setItem(`dp-${message.sender.id}`, message.data.dp);
+                        },
+                        () => {
+                            // Broadcast to viewers that this viewer has connected
+                            const joinMessage: ChatMessage = {
+                                type: ChatMessageType.UserConnected,
+                                sender: viewer,
+                                data: {
+                                    viewers: [
+                                        profile,
+                                        ...viewersRef.current.map((v) => ({
+                                            ...v,
+                                            el: undefined,
+                                            webrtc: undefined,
+                                        })),
+                                    ],
+                                },
+                            };
+                            broadcastDTMessage(joinMessage, null);
                         }
-                    });
+                    );
+
+                    // play user connected sound
+                    joinElRef.current?.play();
                 }
 
                 return {
@@ -118,9 +158,18 @@ export const Host = () => {
             });
 
             if (state === "disconnected") {
+                leaveElRef.current?.play();
                 setViewers((vs) =>
                     Object.fromEntries(Object.entries(vs).filter((entry) => entry[0] !== viewer.id))
                 );
+                viewersRef.current = viewersRef.current.filter((v) => v.id !== viewer.id);
+                const leaveMessage = {
+                    sender: viewer,
+                    type: ChatMessageType.UserDisconnected,
+                    data: null,
+                } as ChatMessage;
+                broadcastDTMessage(leaveMessage, viewer.id);
+                leaveElRef.current?.play();
             }
         };
 
@@ -160,12 +209,15 @@ export const Host = () => {
         try {
             stream.current = await navigator.mediaDevices.getUserMedia({
                 audio: true,
-                video: false,
+                video: true,
             });
+            for (const track of stream.current.getTracks()) {
+                friendlyNames.current.set(track.id, "Voice Audio");
+            }
             setMediaOpts({
                 ...mediaOpts,
                 voice: true,
-                voiceTracks: stream.current.getAudioTracks().map((t) => t.id),
+                voiceTracks: stream.current.getTracks().map((t) => t.id),
             });
         } catch (err) {
             console.log(err);
@@ -200,13 +252,19 @@ export const Host = () => {
                 audio: true,
                 video: true,
             });
+            for (const track of scrStream.current.getTracks()) {
+                friendlyNames.current.set(track.id, "Tab Audio");
+            }
 
             for (const viewer of Object.values(viewers)) {
                 const webrtc = viewer.webrtc;
                 if (!webrtc) continue;
 
-                for (const track of scrStream.current.getAudioTracks()) {
+                for (const track of scrStream.current.getTracks()) {
                     if (!webrtc.remoteTrackIds.includes(track.id)) {
+                        if ("contentHint" in track) {
+                            track.contentHint = "music";
+                        }
                         webrtc.addTrack(track);
                     }
                 }
@@ -215,7 +273,7 @@ export const Host = () => {
             setMediaOpts({
                 ...mediaOpts,
                 screen: true,
-                scrTracks: scrStream.current.getAudioTracks().map((t) => t.id),
+                scrTracks: scrStream.current.getTracks().map((t) => t.id),
             });
         } catch (err) {
             console.log(err);
@@ -224,21 +282,26 @@ export const Host = () => {
 
     const stopScrSharing = () => {
         if (scrStream.current) {
+            const trackIds = scrStream.current.getTracks().map((t) => t.id);
             scrStream.current.getTracks().forEach((track) => {
                 track.stop();
                 stream.current?.removeTrack(track);
             });
+            for (const viewer of Object.values(viewers)) {
+                viewer.webrtc?.removeTracks(trackIds);
+            }
             setMediaOpts({ ...mediaOpts, screen: false, scrTracks: [] });
             scrStream.current = null;
         }
     };
 
     const broadcastDTMessage = (message: any, filter: string | null) => {
+        console.log("Broadcasting message", message, "to", viewersRef.current);
         for (const v of viewersRef.current) {
             if (v.id === filter) {
                 continue;
             }
-            v.webrtc?.sendDTMessage(message);
+            console.log(v.webrtc?.sendDTMessage(message));
         }
     };
 

@@ -1,22 +1,25 @@
 import { AudioMutedOutlined, RedoOutlined } from "@ant-design/icons";
-import { Button, Divider, Flex, Layout, Slider, Typography } from "antd";
+import { Avatar, Button, Divider, Flex, Layout, List, Slider, Tag, Typography } from "antd";
 import Sider from "antd/es/layout/Sider";
-import { Content, Footer } from "antd/es/layout/layout";
+import { Content, Footer, Header } from "antd/es/layout/layout";
 import { useContext, useRef, useState } from "react";
 import { AppCtx } from "./App";
+import { getNameChars } from "./Host";
 import { SignalingChannel, WebRTCViewer } from "./WebRTC";
 import { Chat } from "./components/Chat";
 import { Connect } from "./components/Connect";
-import { ChatMessageType, TextMessage } from "./types";
+import { ChatMessageType, Profile, TextMessage } from "./types";
 
 export const Viewer = () => {
-    const { profile } = useContext(AppCtx);
+    const { profile, joinElRef, leaveElRef, isWindowActive, setIsWindowActive, setNMessages } =
+        useContext(AppCtx);
     const [status, setStatus] = useState({
         connectionStatus: "new",
         audio: true,
         voice: true,
         noHost: false,
     });
+    const localVideoRef = useRef<HTMLVideoElement | null>(null);
     const webrtc = useRef<WebRTCViewer | null>(null);
     const channel = useRef<SignalingChannel | null>(null);
     const localStream = useRef<MediaStream | null>(null);
@@ -24,6 +27,7 @@ export const Viewer = () => {
         [key: string]: { el: HTMLAudioElement; label: string; volume: number };
     }>({});
     const [messages, setMessages] = useState<TextMessage[]>([]);
+    const [viewers, setViewers] = useState<Profile[]>([]);
 
     const connect = async () => {
         setStatus((s) => ({ ...s, connectionStatus: "connecting" }));
@@ -33,8 +37,11 @@ export const Viewer = () => {
         try {
             localStream.current = await navigator.mediaDevices.getUserMedia({
                 audio: true,
-                video: false,
+                video: true,
             });
+            if (localVideoRef.current) {
+                localVideoRef.current.srcObject = localStream.current;
+            }
         } catch (err) {
             console.log(err);
             setStatus((s) => ({ ...s, connectionStatus: "new" }));
@@ -44,7 +51,7 @@ export const Viewer = () => {
         webrtc.current = new WebRTCViewer(
             channel.current!,
             profile!,
-            localStream.current.getAudioTracks()
+            localStream.current.getTracks()
         );
 
         webrtc.current.onNoHost = () => {
@@ -52,27 +59,64 @@ export const Viewer = () => {
         };
 
         webrtc.current.dtMessageHandler = (message) => {
-            if (message.type === ChatMessageType.Text) {
-                setMessages((msgs) => [...msgs, message]);
+            switch (message.type) {
+                case ChatMessageType.UserConnected: {
+                    joinElRef.current?.play();
+                    setViewers(message.data.viewers);
+                    break;
+                }
+
+                case ChatMessageType.UserDisconnected: {
+                    leaveElRef.current?.play();
+                    setViewers(viewers.filter((v) => v.id === message.sender.id));
+                    break;
+                }
+
+                case ChatMessageType.Text: {
+                    setIsWindowActive((active) => {
+                        if (!active) {
+                            setNMessages((n) => n + 1);
+                        }
+                        return active;
+                    });
+
+                    setMessages((msgs) => [...msgs, message]);
+                    break;
+                }
             }
         };
 
-        webrtc.current.onStreamAdded = (id, label, stream) => {
-            const el = document.createElement("audio");
-            el.srcObject = stream;
-            el.hidden = true;
-            el.onloadeddata = () => {
-                el.play();
-            };
-            document.body.appendChild(el);
+        webrtc.current.onStreamChange = (streams: Map<string, MediaStream>) => {
+            console.log("New streams:", streams)
+            // remove existing streams
+            for (const stream of Object.values(audioEls)) {
+                stream.el.remove();
+            }
 
-            setAudioEls((els) => ({
-                ...els,
-                [id]: { id, label, el, volume: 100 },
-            }));
+            // replace with new streams
+            const newEls: any = {};
+            for (const [id, stream] of streams.entries()) {
+                const el = document.createElement("video");
+                el.srcObject = stream;
+                el.controls = true;
+                el.onloadeddata = () => {
+                    el.play();
+                };
+                document.body.appendChild(el);
+
+                newEls[id] = {
+                    id,
+                    label: stream.getTracks()[0]?.label ?? "None",
+                    el,
+                    volume: 100,
+                };
+            }
+
+            setAudioEls(newEls);
         };
 
         webrtc.current.onConnected = () => {
+            joinElRef.current?.play();
             setStatus((s) => ({ ...s, connectionStatus: "connected" }));
         };
     };
@@ -91,7 +135,7 @@ export const Viewer = () => {
 
     const toggleLocal = () => {
         if (localStream.current) {
-            for (const track of localStream.current.getTracks()) {
+            for (const track of localStream.current.getAudioTracks()) {
                 track.enabled = !track.enabled;
             }
         }
@@ -107,8 +151,27 @@ export const Viewer = () => {
         <Layout style={{ height: "100vh" }}>
             <Sider width="30%">
                 <Layout style={{ height: "100%", backgroundColor: "inherit" }}>
-                    <Content style={{ display: "flex", alignItems: "flex-end" }}>
-                        <Divider style={{ marginBottom: 0 }} />
+                    <Header></Header>
+                    <Content>
+                        <Divider />
+                        <List
+                            dataSource={viewers}
+                            size="small"
+                            renderItem={(viewer, index) => (
+                                <List.Item key={viewer?.id}>
+                                    <List.Item.Meta
+                                        style={{ alignItems: "center" }}
+                                        avatar={
+                                            <Avatar size="large">
+                                                {getNameChars(viewer?.name ?? "")}
+                                            </Avatar>
+                                        }
+                                        title={<Typography.Text>{viewer?.name}</Typography.Text>}
+                                    />
+                                    <Tag>{viewer.role}</Tag>
+                                </List.Item>
+                            )}
+                        />
                     </Content>
                     <Footer style={{ backgroundColor: "inherit" }}>
                         <Flex vertical>
@@ -160,6 +223,11 @@ export const Viewer = () => {
                     ) : (
                         <Connect state={status.connectionStatus} onClick={connect} />
                     )}
+                </Content>
+            </Layout>
+            <Layout>
+                <Content>
+                    <video controls ref={localVideoRef} />
                 </Content>
             </Layout>
         </Layout>

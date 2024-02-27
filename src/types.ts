@@ -1,3 +1,4 @@
+import { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { Socket } from "socket.io-client";
 import { WebRTCHost } from "./WebRTC";
 
@@ -24,6 +25,7 @@ export enum MessageType {
     ICE = "ice",
     CreateConnection = "create-connection",
     NoHost = "no-host",
+    TrackChange = "track-change",
 }
 
 export type Message = {
@@ -34,12 +36,19 @@ export type Message = {
 export type AppCtxType = {
     profile: Profile | null;
     dp: string;
+    joinElRef: MutableRefObject<HTMLAudioElement | null>;
+    leaveElRef: MutableRefObject<HTMLAudioElement | null>;
+    isWindowActive: boolean;
+    setIsWindowActive: Dispatch<SetStateAction<boolean>>;
+    setNMessages: Dispatch<SetStateAction<number>>;
 };
 
 export enum ChatMessageType {
     Text = "text",
     UserDP = "user-dp",
     UserConnected = "user-connected",
+    UserDisconnected = "user-disconnected",
+    TrackInfo = "track-info",
 }
 
 export type ChatMessage<Data = any> = {

@@ -83,6 +83,16 @@ export class SignalingChannel {
             }
         });
 
+        this.socket.on("track-change", (payload: any) => {
+            const handler = this.messageHandlers.get(payload.profile.id);
+            if (handler) {
+                handler({
+                    type: MessageType.TrackChange,
+                    payload,
+                });
+            }
+        });
+
         this.socket.on("host-already-exists", (payload: any) => {
             if (this.onHostAlreadyExists) {
                 this.onHostAlreadyExists(payload.hostProfile);
@@ -219,10 +229,27 @@ export class WebRTCHost {
         this.connection.addTrack(track);
     }
 
-    public createDataChannel(messageHandler: (message: any) => void) {
+    public removeTracks(ids: string[]) {
+        const senders = this.connection
+            .getSenders()
+            .filter((sender) => sender.track !== null && ids.includes(sender.track.id));
+
+        for (const sender of senders) {
+            this.connection.removeTrack(sender);
+        }
+        this.channel.sendMessage({
+            type: MessageType.TrackChange,
+            payload: { profile: this.viewerProfile, action: "remove", ids },
+        });
+    }
+
+    public createDataChannel(messageHandler: (message: any) => void, onOpen: () => void) {
         this.dataChannel = this.connection.createDataChannel("general", { ordered: true });
         this.dataChannel.onmessage = (ev) => {
             messageHandler(JSON.parse(ev.data));
+        };
+        this.dataChannel.onopen = () => {
+            onOpen();
         };
     }
 
@@ -246,7 +273,7 @@ export class WebRTCViewer {
     streams: Map<string, MediaStream>;
     onConnected: (() => void) | null = null;
     onNoHost: (() => void) | null = null;
-    onStreamAdded: ((id: string, label: string, stream: MediaStream) => void) | null = null;
+    onStreamChange: ((streams: Map<string, MediaStream>) => void) | null = null;
     dataChannel: RTCDataChannel | null = null;
     dtMessageHandler: ((message: ChatMessage) => void) | null = null;
     dtOpenHandler: (() => void) | null = null;
@@ -269,8 +296,8 @@ export class WebRTCViewer {
 
             const stream = new MediaStream([ev.track]);
             this.streams.set(ev.track.id, stream);
-            if (this.onStreamAdded) {
-                this.onStreamAdded(ev.track.id, ev.track.label, stream);
+            if (this.onStreamChange) {
+                this.onStreamChange(this.streams);
             }
         };
 
@@ -348,6 +375,17 @@ export class WebRTCViewer {
             case MessageType.NoHost: {
                 if (this.onNoHost) {
                     this.onNoHost();
+                }
+                break;
+            }
+
+            case MessageType.TrackChange: {
+                if (message.payload.action !== "remove") break;
+                for (const id of message.payload.ids) {
+                    this.streams.delete(id);
+                }
+                if (this.onStreamChange) {
+                    this.onStreamChange(this.streams);
                 }
                 break;
             }

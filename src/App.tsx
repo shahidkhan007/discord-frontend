@@ -1,5 +1,5 @@
 import { ConfigProvider, Flex, Spin, Typography, theme } from "antd";
-import { createContext, useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useEffect, useRef, useState } from "react";
 import { v5 } from "uuid";
 import { Host } from "./Host";
 import { Viewer } from "./Viewer";
@@ -13,6 +13,11 @@ function App() {
     const [dp, setDP] = useState("");
     const [role, setRole] = useState<"undecided" | "host" | "viewer">("undecided");
     const [profile, setProfile] = useState<Profile | null>(null);
+    const joinElRef = useRef<HTMLAudioElement | null>(null);
+    const leaveElRef = useRef<HTMLAudioElement | null>(null);
+    const pingElRef = useRef<HTMLAudioElement | null>(null);
+    const [nMessages, setNMessages] = useState(0);
+    const [isWindowActive, setIsWindowActive] = useState(true);
 
     async function checkForHost(): Promise<Profile | null> {
         try {
@@ -70,11 +75,36 @@ function App() {
     }, []);
 
     useEffect(() => {
+        window.onfocus = () => {
+            document.title = "Discord";
+            setNMessages(0);
+            setIsWindowActive(true);
+        };
+        window.onblur = () => {
+            setIsWindowActive(false);
+        };
         decideRole();
     }, [decideRole]);
 
+    useEffect(() => {
+        if (nMessages > 0) {
+            document.title = `(${nMessages}) Discord`;
+            pingElRef.current?.play();
+        }
+    }, [nMessages]);
+
     return (
-        <AppCtx.Provider value={{ profile, dp }}>
+        <AppCtx.Provider
+            value={{
+                profile,
+                dp,
+                joinElRef,
+                leaveElRef,
+                isWindowActive,
+                setIsWindowActive,
+                setNMessages,
+            }}
+        >
             <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
                 {role === "host" ? (
                     profile ? (
@@ -96,6 +126,9 @@ function App() {
                         </Typography.Title>
                     </Flex>
                 )}
+                <audio preload="auto" src="/discord-join.mp3" ref={joinElRef} />
+                <audio preload="auto" src="/discord-leave.mp3" ref={leaveElRef} />
+                <audio preload="auto" src="/discord-ping.mp3" ref={pingElRef} />
             </ConfigProvider>
         </AppCtx.Provider>
     );

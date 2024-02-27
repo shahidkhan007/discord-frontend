@@ -1,5 +1,4 @@
-import { UserOutlined } from "@ant-design/icons";
-import { Avatar, Button, Flex, Layout } from "antd";
+import { Flex, Layout } from "antd";
 import Search from "antd/es/input/Search";
 import { Content } from "antd/es/layout/layout";
 import { ChangeEvent, useRef, useState } from "react";
@@ -59,7 +58,7 @@ export const CreateProfile = ({ role }: any) => {
                     align="center"
                     gap="middle"
                 >
-                    <Flex vertical gap="middle" align="center">
+                    {/* <Flex vertical gap="middle" align="center">
                         <Avatar size={128} shape="circle" src={imageURL} icon={<UserOutlined />} />
 
                         <Button
@@ -77,7 +76,7 @@ export const CreateProfile = ({ role }: any) => {
                             style={{ display: "none" }}
                             accept="image/*"
                         />
-                    </Flex>
+                    </Flex> */}
                     <Search
                         placeholder="Enter name"
                         enterButton="Set name"
